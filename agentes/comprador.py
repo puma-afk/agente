@@ -1,12 +1,13 @@
 from typing import List
 import random
+import math
 
 from core.modelos import Sucursal, Producto
 
 
 class AgenteComprador:
     """
-    Agente basado en utilidad con búsqueda de Ascensión de Colinas.
+    Agente basado en utilidad con búsqueda de Temple Simulado (Simulated Annealing).
 
     - Restricción: la suma de precios no debe exceder el monto del vale.
     - Objetivo: maximizar la suma (usar lo máximo posible del vale).
@@ -38,15 +39,21 @@ class AgenteComprador:
                 seleccion[i] = False
         return seleccion
 
-    def _vecinos(self, seleccion: List[bool]) -> List[List[bool]]:
-        vecinos = []
+    def _vecino_aleatorio(self, seleccion: List[bool]) -> List[bool] | None:
+        """
+        Genera un vecino al azar cambiando un producto,
+        manteniendo la solución válida.
+        """
         n = len(seleccion)
-        for i in range(n):
+        indices = list(range(n))
+        random.shuffle(indices)
+
+        for i in indices:
             nueva = seleccion.copy()
             nueva[i] = not nueva[i]
             if self._es_valida(nueva):
-                vecinos.append(nueva)
-        return vecinos
+                return nueva
+        return None
 
     def planificar_compra(self) -> List[Producto]:
         if not self.sucursal.productos:
@@ -55,30 +62,45 @@ class AgenteComprador:
         actual = self._generar_solucion_inicial()
         valor_actual = self._evaluar(actual)
 
-        mejorando = True
-        while mejorando:
-            vecinos = self._vecinos(actual)
-            if not vecinos:
+        mejor = actual.copy()
+        mejor_valor = valor_actual
+
+        T = max(self.monto_vale, 1.0)
+        T_min = 1e-3
+        alpha = 0.95
+        max_iter = 1000
+
+        for _ in range(max_iter):
+            if T < T_min:
                 break
 
-            mejor_vecino = actual
-            mejor_valor = valor_actual
+            vecino = self._vecino_aleatorio(actual)
+            if vecino is None:
+                break
 
-            for v in vecinos:
-                val = self._evaluar(v)
-                if val > mejor_valor:
-                    mejor_valor = val
-                    mejor_vecino = v
+            valor_vecino = self._evaluar(vecino)
+            delta = valor_vecino - valor_actual
 
-            if mejor_valor <= valor_actual + 1e-6:
-                mejorando = False
+            if delta >= 0:
+                actual = vecino
+                valor_actual = valor_vecino
             else:
-                actual = mejor_vecino
-                valor_actual = mejor_valor
+                try:
+                    prob = math.exp(delta / T)
+                except OverflowError:
+                    prob = 0.0
+                if random.random() < prob:
+                    actual = vecino
+                    valor_actual = valor_vecino
+
+            if valor_actual > mejor_valor + 1e-6:
+                mejor = actual.copy()
+                mejor_valor = valor_actual
+
+            T = max(T * alpha, T_min)
 
         resultado: List[Producto] = []
-        for toma, prod in zip(actual, self.sucursal.productos):
+        for toma, prod in zip(mejor, self.sucursal.productos):
             if toma:
                 resultado.append(prod)
         return resultado
-
